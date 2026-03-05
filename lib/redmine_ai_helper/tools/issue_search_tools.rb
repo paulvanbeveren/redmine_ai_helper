@@ -2,13 +2,66 @@ module RedmineAiHelper
   module Tools
     # A class that provides functionality to the Agent for retrieving issue information
     class IssueSearchTools < RedmineAiHelper::BaseTools
-      define_function :search_issues, description: "Search issues based on the filter conditions and return matching issues. For search items with '_id', specify the ID instead of the name of the search target. If you do not know the ID, you need to call capable_issue_properties in advance to obtain the ID. Default limit is 50 issues." do
+      # Valid Redmine operators mapping
+      # Maps common operator names to Redmine's query operators
+      OPERATOR_MAP = {
+        'equals' => '=',
+        'not_equals' => '!',
+        'contains' => '~',
+        'not_contains' => '!~',
+        'in' => '=',
+        'not_in' => '!',
+        'greater_than' => '>',
+        'greater_or_equal' => '>=',
+        'less_than' => '<',
+        'less_or_equal' => '<=',
+        'between' => '><',
+        'any' => '*',
+        'none' => '!*',
+        'all' => '*',
+        # Direct operators (already in correct format)
+        '=' => '=',
+        '!' => '!',
+        '~' => '~',
+        '!~' => '!~',
+        '>' => '>',
+        '>=' => '>=',
+        '<' => '<',
+        '<=' => '<=',
+        '><' => '><',
+        '*' => '*',
+        '!*' => '!*',
+        # Date operators
+        '<t+' => '<t+',
+        '>t+' => '>t+',
+        't+' => 't+',
+        '>t-' => '>t-',
+        '<t-' => '<t-',
+        't-' => 't-',
+        't' => 't',
+        'ld' => 'ld',
+        'w' => 'w',
+        'lw' => 'lw',
+        'm' => 'm',
+        'lm' => 'lm',
+        'y' => 'y'
+      }.freeze
+
+      # Valid operators per field type
+      VALID_OPERATORS = {
+        text: ['=', '~', '!~', '*', '!*'],
+        number: ['=', '!', '>', '>=', '<', '<=', '><', '*', '!*'],
+        date: ['=', '>=', '<=', '><', '<t+', '>t+', 't+', '>t-', '<t-', 't-', 't', 'ld', 'w', 'lw', 'm', 'lm', 'y'],
+        list: ['=', '!', '*', '!*']
+      }.freeze
+
+      define_function :search_issues, description: "Search issues based on the filter conditions and return matching issues. For search items with '_id', specify the ID instead of the name of the search target. If you do not know the ID, you need to call capable_issue_properties in advance to obtain the ID. Default limit is 50 issues. Valid operators: For text fields: '=' (equals), '~' (contains), '!~' (not contains), '*' (any), '!*' (none). For number fields: '=', '!', '>', '>=', '<', '<=', '><' (between). For dates: '=', '>=', '<=', '><', relative date operators like 't+', 't-', etc." do
         property :project_id, type: "integer", description: "The project ID of the project to search in.", required: true
         property :limit, type: "integer", description: "Maximum number of issues to return. Default is 50.", required: false
         property :fields, type: "array", description: "Search fields for the issue." do
           item type: "object", description: "Search field for the issue." do
             property :field_name, type: "string", description: "The name of the field to search.", required: true
-            property :operator, type: "string", description: "The operator to use for the search.", required: true
+            property :operator, type: "string", description: "The operator to use for the search. Use '~' for contains, '=' for equals, '!~' for not contains, etc.", required: true
             property :values, type: "array", description: "The values to search for.", required: true do
               item type: "string", description: "The value to search for."
             end
@@ -17,7 +70,7 @@ module RedmineAiHelper
         property :date_fields, type: "array", description: "Search fields for the issue." do
           item type: "object", description: "Search field for the issue." do
             property :field_name, type: "string", description: "The name of the field to search.", required: true
-            property :operator, type: "string", description: "The operator to use for the search.", required: true
+            property :operator, type: "string", description: "The operator to use for the search. Use SQL-compliant operators.", required: true
             property :values, type: "array", description: "The values to search for.", required: true do
               item type: "string", description: "The value to search for."
             end
@@ -35,7 +88,7 @@ module RedmineAiHelper
         property :number_fields, type: "array", description: "Search fields for the issue." do
           item type: "object", description: "Search field for the issue." do
             property :field_name, type: "string", description: "The name of the field to search.", required: true
-            property :operator, type: "string", description: "The operator to use for the search.", required: true
+            property :operator, type: "string", description: "The operator to use for the search. Valid: '=', '!', '>', '>=', '<', '<=', '><'", required: true
             property :values, type: "array", description: "The values to search for.", required: true do
               item type: "integer", description: "The value to search for."
             end
@@ -44,7 +97,7 @@ module RedmineAiHelper
         property :text_fields, type: "array", description: "Search fields for the issue." do
           item type: "object", description: "Search field for the issue." do
             property :field_name, type: "string", description: "The name of the field to search.", required: true
-            property :operator, type: "string", description: "The operator to use for the search.", required: true
+            property :operator, type: "string", description: "The operator to use for the search. Use '~' for contains, '=' for equals, '!~' for not contains.", required: true
             property :value, type: "array", description: "The values to search for.", required: true do
               item type: "string", description: "The value to search for."
             end
@@ -69,6 +122,7 @@ module RedmineAiHelper
           end
         end
       end
+
       # Search issues based on filter conditions and return matching issues
       # @param project_id [Integer] The project ID of the project to search in.
       # @param limit [Integer] Maximum number of issues to return. Default is 50.
@@ -93,7 +147,7 @@ module RedmineAiHelper
           return { issues: format_issues(issues), total_count: total_count }
         end
 
-        validate_errors = validate_search_params(fields, date_fields)
+        validate_errors = validate_search_params(fields, date_fields, number_fields, text_fields)
         raise(validate_errors.join("\n")) if validate_errors.length > 0
 
         params = { fields: [], operators: {}, values: {} }
@@ -102,44 +156,58 @@ module RedmineAiHelper
         params[:values]["project_id"] = [project_id.to_s]
 
         fields.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:values]
         end
 
         date_fields.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:values]
         end
 
         time_fields.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:values]
         end
 
         number_fields.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:values].map(&:to_s)
         end
 
         text_fields.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:value]
         end
 
         status_field.each do |field|
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
           params[:fields] << field[:field_name]
-          params[:operators][field[:field_name]] = field[:operator]
+          params[:operators][field[:field_name]] = normalized_operator
           params[:values][field[:field_name]] = field[:values].map(&:to_s)
         end
 
         builder = IssueQueryBuilder.new(params)
         custom_fields.each do |field|
-          builder.add_custom_field_filter(field[:field_id], field[:operator], field[:values].map(&:to_s))
+          field = normalize_hash_keys(field)
+          normalized_operator = normalize_operator(field[:operator])
+          builder.add_custom_field_filter(field[:field_id], normalized_operator, field[:values].map(&:to_s))
         end
 
         issues = builder.execute(project, user: User.current, limit: limit)
@@ -149,6 +217,33 @@ module RedmineAiHelper
       end
 
       private
+
+      # Normalize hash keys to symbols for consistent access
+      # Handles both string and symbol keys from JSON/LLM inputs
+      # @param hash [Hash] The hash to normalize
+      # @return [Hash] Hash with symbol keys
+      def normalize_hash_keys(hash)
+        return hash if hash.keys.first.is_a?(Symbol)
+        hash.transform_keys(&:to_sym)
+      end
+
+      # Normalize operator to Redmine's query operator format
+      # Handles both string and symbol keys for compatibility
+      # @param operator [String] The operator to normalize
+      # @return [String] The normalized operator
+      def normalize_operator(operator)
+        return operator unless operator
+        
+        # Return as-is if already a valid Redmine operator
+        return operator if OPERATOR_MAP.value?(operator)
+        
+        # Try to map from common name to Redmine operator
+        normalized = OPERATOR_MAP[operator.to_s.downcase]
+        return normalized if normalized
+        
+        # If not found, return the original (will be caught by validation)
+        operator
+      end
 
       # Format issues for API response
       # @param issues [Array<Issue>] Array of Issue objects
@@ -183,11 +278,20 @@ module RedmineAiHelper
       end
 
       # Validate the parameters for the search_issues tool
-      def validate_search_params(fields, date_fields)
+      # Handles both string and symbol keys for compatibility
+      def validate_search_params(fields, date_fields, number_fields = [], text_fields = [])
         errors = []
 
         fields.each do |field|
-          if field[:field_name].match(/_id$/) && field[:values].length > 0
+          field = normalize_hash_keys(field)
+          
+          # Normalize and validate operator
+          operator = normalize_operator(field[:operator])
+          unless OPERATOR_MAP.value?(operator)
+            errors << "Invalid operator '#{field[:operator]}' for field #{field[:field_name]}. Valid operators are: #{VALID_OPERATORS[:list].join(', ')}"
+          end
+
+          if field[:field_name].to_s.match(/_id$/) && field[:values] && field[:values].length > 0
             field[:values].each do |value|
               unless value.to_s.match(/^\d+$/)
                 errors << "The #{field[:field_name]} requires a numeric value. But the value is #{value}."
@@ -196,36 +300,62 @@ module RedmineAiHelper
           end
         end
 
+        number_fields.each do |field|
+          field = normalize_hash_keys(field)
+          operator = normalize_operator(field[:operator])
+          unless VALID_OPERATORS[:number].include?(operator)
+            errors << "Invalid operator '#{field[:operator]}' for number field #{field[:field_name]}. Valid operators are: #{VALID_OPERATORS[:number].join(', ')}"
+          end
+        end
+
+        text_fields.each do |field|
+          field = normalize_hash_keys(field)
+          operator = normalize_operator(field[:operator])
+          unless VALID_OPERATORS[:text].include?(operator)
+            errors << "Invalid operator '#{field[:operator]}' for text field #{field[:field_name]}. Valid operators are: #{VALID_OPERATORS[:text].join(', ')}"
+          end
+        end
+
         date_fields.each do |field|
-          case field[:operator]
+          field = normalize_hash_keys(field)
+          operator = normalize_operator(field[:operator])
+          unless VALID_OPERATORS[:date].include?(operator)
+            errors << "Invalid operator '#{field[:operator]}' for date field #{field[:field_name]}. Valid operators are: #{VALID_OPERATORS[:date].join(', ')}"
+          end
+
+          case operator
           when "=", ">=", "<=", "><"
-            if field[:values].length == 0
-              errors << "The #{field[:field_name]} and #{field[:operator]} requires an absolute date value. But no value is specified."
+            if !field[:values] || field[:values].length == 0
+              errors << "The #{field[:field_name]} and #{operator} requires an absolute date value. But no value is specified."
             end
-            field[:values].each do |value|
-              unless value.match(/\d{4}-\d{2}-\d{2}/)
-                errors << "The #{field[:field_name]} and #{field[:operator]} requires an absolute date value in the format YYYY-MM-DD. But the value is #{value}."
+            if field[:values]
+              field[:values].each do |value|
+                unless value.match(/\d{4}-\d{2}-\d{2}/)
+                  errors << "The #{field[:field_name]} and #{operator} requires an absolute date value in the format YYYY-MM-DD. But the value is #{value}."
+                end
               end
             end
           when "<t+", ">t+", "t+", ">t-", "<t-", "t-"
-            if field[:values].length == 0
-              errors << "The #{field[:field_name]} and #{field[:operator]} requires a relative date value. But no value is specified."
+            if !field[:values] || field[:values].length == 0
+              errors << "The #{field[:field_name]} and #{operator} requires a relative date value. But no value is specified."
             end
-            field[:values].each do |value|
-              unless value.match(/\d+/)
-                errors << "The #{field[:field_name]} and #{field[:operator]} requires a relative date value. But the value is #{value}."
+            if field[:values]
+              field[:values].each do |value|
+                unless value.match(/\d+/)
+                  errors << "The #{field[:field_name]} and #{operator} requires a relative date value. But the value is #{value}."
+                end
               end
             end
           else
-            unless field[:values].length == 0
-              errors << "The #{field[:field_name]} and #{field[:operator]} does not require a value. But the value is specified."
+            if field[:values] && field[:values].length > 0
+              errors << "The #{field[:field_name]} and #{operator} does not require a value. But the value is specified."
             end
           end
         end
 
         errors
       end
-
+      
       # IssueQueryBuilder is a class that builds a query for searching issues in Redmine.
       #
       class IssueQueryBuilder

@@ -273,7 +273,7 @@ module RedmineAiHelper
           when "match"
             item[:match] = { value: value }
           when "lt", "lte", "gt", "gte"
-            item[:rante] = {
+            item[:range] = {  # Fixed typo: was 'rante'
               f[:condition] => value,
             }
           end
@@ -283,7 +283,7 @@ module RedmineAiHelper
 
         filter_json
       end
-
+      
       # Check if the vector database is enabled.
       # @return [Boolean] True if the vector database is enabled, false otherwise.
       def vector_db_enabled?
