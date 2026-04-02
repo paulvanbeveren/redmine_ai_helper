@@ -22,20 +22,37 @@ module RedmineAiHelper
       # Returns an instance of the appropriate LLM client based on the system settings.
       # @return [Object] An instance of the appropriate LLM client.
       def get_llm_provider
-        case type
-        when LLM_OPENAI
-          return RedmineAiHelper::LlmClient::OpenAiProvider.new
-        when LLM_OPENAI_COMPATIBLE
-          return RedmineAiHelper::LlmClient::OpenAiCompatibleProvider.new
-        when LLM_GEMINI
-          return RedmineAiHelper::LlmClient::GeminiProvider.new
-        when LLM_ANTHROPIC
-          return RedmineAiHelper::LlmClient::AnthropicProvider.new
-        when LLM_AZURE_OPENAI
-          return RedmineAiHelper::LlmClient::AzureOpenAiProvider.new
-        else
-          raise NotImplementedError, "LLM provider not found"
-        end
+        setting = AiHelperSetting.find_or_create
+        provider_for_profile(setting.model_profile)
+      end
+
+      # Returns an LLM provider instance for vector operations.
+      # The returned provider supplies API credentials and the chat model used for
+      # content analysis. Note: the embedding model name is still controlled by
+      # AiHelperSetting#embedding_model, not by the profile's llm_model.
+      # Falls back to get_llm_provider when:
+      #   - use_vector_model_profile is false
+      #   - vector_model_profile_id is blank
+      # Raises ActiveRecord::RecordNotFound if use_vector_model_profile is true but the
+      # referenced profile no longer exists.
+      # @return [Object] An instance of the appropriate LLM client.
+      def get_vector_llm_provider
+        setting = AiHelperSetting.find_or_create
+        return get_llm_provider unless setting.use_vector_model_profile? && setting.vector_model_profile_id.present?
+        profile = AiHelperModelProfile.find(setting.vector_model_profile_id)
+        provider_for_profile(profile)
+      end
+
+      # Returns an LLM provider instance for the Think model, or nil if not configured.
+      # nil return means BaseAgent#think_chat will delegate to chat().
+      # Raises ActiveRecord::RecordNotFound if use_think_model is true but the
+      # referenced profile no longer exists.
+      # @return [Object, nil] An instance of the appropriate LLM client, or nil.
+      def get_think_llm_provider
+        setting = AiHelperSetting.find_or_create
+        return nil unless setting.use_think_model? && setting.think_model_profile_id.present?
+        profile = AiHelperModelProfile.find(setting.think_model_profile_id)
+        provider_for_profile(profile)
       end
 
       # Returns the LLM type based on the system settings.
@@ -43,6 +60,26 @@ module RedmineAiHelper
       def type
         setting = AiHelperSetting.find_or_create
         setting.model_profile.llm_type
+      end
+
+      # Instantiates the correct provider for a given AiHelperModelProfile.
+      # @param profile [AiHelperModelProfile] The model profile to use.
+      # @return [Object] An instance of the appropriate LLM client.
+      def provider_for_profile(profile)
+        case profile.llm_type
+        when LLM_OPENAI
+          return RedmineAiHelper::LlmClient::OpenAiProvider.new(model_profile: profile)
+        when LLM_OPENAI_COMPATIBLE
+          return RedmineAiHelper::LlmClient::OpenAiCompatibleProvider.new(model_profile: profile)
+        when LLM_GEMINI
+          return RedmineAiHelper::LlmClient::GeminiProvider.new(model_profile: profile)
+        when LLM_ANTHROPIC
+          return RedmineAiHelper::LlmClient::AnthropicProvider.new(model_profile: profile)
+        when LLM_AZURE_OPENAI
+          return RedmineAiHelper::LlmClient::AzureOpenAiProvider.new(model_profile: profile)
+        else
+          raise NotImplementedError, "LLM provider not found"
+        end
       end
 
       # Returns the options to display in the settings screen's dropdown menu

@@ -72,4 +72,92 @@ class AiHelperSettingsControllerTest < ActionController::TestCase
     post :update, params: { ai_helper_setting: { attachment_send_enabled: "0", attachment_max_size_mb: "0" } }
     assert_redirected_to action: :index
   end
+
+  context "vector model profile settings" do
+    setup do
+      @vector_profile = AiHelperModelProfile.create!(
+        name: "Vector Profile",
+        access_key: "vec_key",
+        llm_type: "OpenAI",
+        llm_model: "text-embedding-3-large",
+      )
+    end
+
+    teardown do
+      @vector_profile.destroy if @vector_profile.persisted?
+    end
+
+    should "save use_vector_model_profile true with valid vector_model_profile_id" do
+      post :update, params: { ai_helper_setting: { vector_search_enabled: "1", vector_search_uri: "http://localhost:6333", use_vector_model_profile: "1", vector_model_profile_id: @vector_profile.id } }
+      assert_redirected_to action: :index
+      @ai_helper_setting.reload
+      assert_equal true, @ai_helper_setting.use_vector_model_profile
+      assert_equal @vector_profile.id, @ai_helper_setting.vector_model_profile_id
+    end
+
+    should "not save when use_vector_model_profile true but vector_model_profile_id blank" do
+      post :update, params: { ai_helper_setting: { vector_search_enabled: "1", vector_search_uri: "http://localhost:6333", use_vector_model_profile: "1", vector_model_profile_id: "" } }
+      assert_response :success
+      @ai_helper_setting.reload
+      assert_not @ai_helper_setting.use_vector_model_profile
+    end
+
+    should "save use_vector_model_profile false and clear vector_model_profile_id" do
+      @ai_helper_setting.update_columns(use_vector_model_profile: true, vector_model_profile_id: @vector_profile.id)
+      post :update, params: { ai_helper_setting: { use_vector_model_profile: "0", vector_model_profile_id: "" } }
+      assert_redirected_to action: :index
+      @ai_helper_setting.reload
+      assert_equal false, @ai_helper_setting.use_vector_model_profile
+      assert_nil @ai_helper_setting.vector_model_profile_id
+    end
+
+    should "render vector model profile checkbox on index" do
+      get :index
+      assert_response :success
+      assert_select "input[type=checkbox][name='ai_helper_setting[use_vector_model_profile]']"
+    end
+  end
+
+  context "think model settings" do
+    setup do
+      @think_profile = AiHelperModelProfile.create!(
+        name: "Think Profile",
+        access_key: "think_key",
+        llm_type: "Anthropic",
+        llm_model: "claude-3-7-sonnet",
+      )
+    end
+
+    teardown do
+      @think_profile.destroy if @think_profile.persisted?
+    end
+
+    should "save use_think_model true with valid think_model_profile_id" do
+      post :update, params: { ai_helper_setting: { use_think_model: "1", think_model_profile_id: @think_profile.id } }
+      assert_redirected_to action: :index
+      @ai_helper_setting.reload
+      assert_equal true, @ai_helper_setting.use_think_model
+      assert_equal @think_profile.id, @ai_helper_setting.think_model_profile_id
+    end
+
+    should "not save when use_think_model true but think_model_profile_id blank" do
+      post :update, params: { ai_helper_setting: { use_think_model: "1", think_model_profile_id: "" } }
+      assert_response :success
+      @ai_helper_setting.reload
+      assert_not @ai_helper_setting.use_think_model
+    end
+
+    should "save use_think_model false regardless of think_model_profile_id" do
+      post :update, params: { ai_helper_setting: { use_think_model: "0", think_model_profile_id: "" } }
+      assert_redirected_to action: :index
+      @ai_helper_setting.reload
+      assert_equal false, @ai_helper_setting.use_think_model
+    end
+
+    should "render think model checkbox on index" do
+      get :index
+      assert_response :success
+      assert_select "input[type=checkbox][name='ai_helper_setting[use_think_model]']"
+    end
+  end
 end

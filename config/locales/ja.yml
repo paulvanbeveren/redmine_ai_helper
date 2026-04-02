@@ -117,9 +117,14 @@ ja:
     model_profiles:
       create_profile_title: "新しいモデルプロファイル"
       edit_profile_title: "モデルプロファイルの編集"
+      test_connection: "接続テスト"
+      test_connection_success: "接続成功"
+      test_connection_failed: "接続失敗"
       messages:
         confirm_delete: "このモデルプロファイルを削除してもよろしいですか？"
         must_be_valid_url: "は有効なURLを入力してください"
+        required_fields_missing: "必須フィールドが未入力です。"
+        access_key_required: "接続テストにはアクセスキーが必要です。"
     prompts:
       current_page_info:
         project_page: "プロジェクト「%{project_name}」の情報ページです"
@@ -151,7 +156,7 @@ ja:
         search_answer_instruction: "なお、「条件に合ったチケットを探して」「こういう条件のチケット見せて」の様な複数のチケットを探すタスクの場合には、search_issuesツールを使ってチケットの一覧を取得し、結果を返してください。"
         search_answer_instruction_with_vector: "チケットを検索する際は、以下のように使い分けてください：概念的・意味的な検索（「例外に関するチケット」「パフォーマンス問題」「ログイン関連のバグ」など）にはベクトル検索（ask_with_filter）を使用し、明確なフィルタ条件（「ステータスが完了」「担当者が○○」「今月更新された」など属性値で絞り込む場合）にはsearch_issuesを使用してください。"
       leader_agent:
-        generate_final_response: "全てのエージェントがタスクを完了しました。ユーザーへの最終的な回答を作成してください。"
+        generate_final_response: "全てのエージェントがタスクを完了しました。ユーザーへの最終的な回答を作成してください。回答に離散的な選択肢を提示する質問が含まれる場合は、最後に <!--AIHELPER_OPTIONS:{...}--> ブロックを追加することを忘れないでください。"
     custom_commands:
       label:
         title: カスタムコマンド
@@ -200,6 +205,12 @@ ja:
         vector_search_api_key: "APIキー"
         embedding_model: "埋め込みモデル"
         dimension: "次元数"
+        use_think_model: "Thinkモデルを使用する"
+        think_model_profile_id: "Thinkモデルプロファイル"
+        think_model_description: "健全性レポートの生成やチケット回答案の作成など、高度な推論が必要なタスクに別のモデルを使用します。"
+        use_vector_model_profile: "ベクトル検索用モデルプロファイルを使用する"
+        vector_model_profile_id: "ベクトル検索用モデルプロファイル"
+        vector_model_profile_description: "ベクトル検索操作（APIの認証情報とコンテンツ分析）に別のモデルプロファイルを使用します。埋め込みモデル名は上記の「埋め込みモデル」設定で制御されます。"
       ai_helper_project_setting:
         issue_draft_instructions: "チケットのコメントを生成する際の指示"
         subtask_instructions: "子チケットを生成する際の指示"
